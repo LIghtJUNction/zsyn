@@ -274,8 +274,12 @@ fn main() {
         }
         let node_count = ours.as_tree().nodes().len();
         let arena_bytes = ours.as_tree().storage_bytes();
+        let diagnostic_count = ours.as_tree().diagnostics().len();
+        drop(records);
+        drop(oracle);
+        drop(ours);
         let mut nodes = vec![Node::EMPTY; node_count + 64];
-        let mut diagnostics = vec![Diagnostic::EMPTY; ours.as_tree().diagnostics().len() + 16];
+        let mut diagnostics = vec![Diagnostic::EMPTY; diagnostic_count + 16];
         let reserved = nodes.len() * std::mem::size_of::<Node>()
             + diagnostics.len() * std::mem::size_of::<Diagnostic>();
         let reference_ns = median_ns(|| {
@@ -336,6 +340,9 @@ fn main() {
                 hash,
             });
         }
+        drop(nodes);
+        drop(diagnostics);
+        drop(owned_sample);
         let at = workload.edit_at;
         let original = &source[at..at + 1];
         let replacement = if original == "q" { "r" } else { "q" };
@@ -365,6 +372,11 @@ fn main() {
             oracle_canonical(typst_edit.root()),
             oracle_canonical(&oracle_after)
         );
+        drop(full_after);
+        drop(oracle_after);
+        drop(changed);
+        drop(zsyn_edit);
+        drop(typst_edit);
         let first_reference_ns = first_edit_ns(
             || typst_syntax::Source::detached(source),
             |tree| {
@@ -380,6 +392,10 @@ fn main() {
                 );
             },
         );
+        let mut zsyn_edit = OwnedTree::parse(source, Mode::Markup, limits).unwrap();
+        let mut typst_edit = typst_syntax::Source::detached(source);
+        zsyn_edit.edit(at..at + 1, replacement, limits).unwrap();
+        typst_edit.edit(at..at + 1, replacement);
         let mut flip = false;
         let hot_reference_ns = median_ns(|| {
             let text = if flip { replacement } else { original };

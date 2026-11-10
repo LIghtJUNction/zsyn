@@ -54,8 +54,17 @@ fn mode_boundaries_literals_and_combinations() {
         (Mode::Code, "import \"f\": ( q,\n x, )"),
         (Mode::Markup, "#import \"f\": (q, x)\n#q"),
     ];
+    let additional = [
+        (Mode::Math, "frac(..#args)"),
+        (Mode::Math, "foo(..a+b)"),
+        (Mode::Math, "foo(#f(1))"),
+        (Mode::Math, "√x^2"),
+        (Mode::Markup, "  ```rust\n  fn main() {}\n  ```\n"),
+        (Mode::Markup, "```\n  a\n    b\n  ```"),
+        (Mode::Markup, "```\n\n```"),
+    ];
     let mut failures = Vec::new();
-    for (mode, source) in cases {
+    for (mode, source) in cases.into_iter().chain(additional) {
         if let Err(error) = equivalence(source, mode) {
             failures.push(format!("{mode:?} {source:?}: {error}"));
         }

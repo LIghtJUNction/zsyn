@@ -42,7 +42,7 @@ RUSTFLAGS='-C target-cpu=x86-64' cargo run --locked --release \
 python3 comparison/merge-results.py timing.csv memory.csv benchmark.csv
 ```
 
-Full-parse and hot-edit timings perform eight warm-up calls, calibrate a batch to at least 15 ms, and report the median of nine equal-sized batches. First-edit timings use the independent-tree procedure below. `std::hint::black_box` surrounds inputs and results. Complete parsed results are dropped inside the timed region. The release profile uses optimization level 3, thin LTO, and one codegen unit for both implementations.
+Full-parse and hot-edit timings perform eight warm-up calls, calibrate a batch to at least 15 ms, and report the median of nine equal-sized batches. First-edit timings use the independent-tree procedure below. `std::hint::black_box` surrounds inputs and results. Complete parsed results are dropped inside the timed region. Equivalence-check trees and canonical records are released before timing, so their allocations do not remain live during measurement. The release profile uses optimization level 3, thin LTO, and one codegen unit for both implementations.
 
 Full parsing reports two zsyn interfaces. `zsyn-arena` reuses caller-allocated node and diagnostic buffers, measuring the core parser's advertised allocation-free API. `zsyn-owned` includes source ownership and allocations on every call. Both build the same verified complete tree. The separate rows show the cost of owning the source and allocating storage; the arena row assumes the application already has reusable buffers.
 

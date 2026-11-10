@@ -1788,9 +1788,28 @@ impl Parser<'_, '_> {
             }
             let before = self.pos;
             let mut arg = Chain::EMPTY;
+            let rest = &self.source[self.pos..];
+            let spread = rest.starts_with("..")
+                && rest[2..].chars().next().is_some_and(|c| {
+                    !c.is_whitespace() && !matches!(c, '.' | ')' | ']' | '}' | ',' | ';' | '$')
+                });
+            if spread {
+                let dots = self.node(
+                    K::Dots,
+                    Span {
+                        start: self.pos as u32,
+                        end: self.pos as u32 + 2,
+                    },
+                    NIL,
+                )?;
+                self.push(&mut arg, dots);
+                self.pos += 2;
+                self.cached = None;
+            }
             let first = self.peek(Mode::Math).unwrap();
             let after = self.token_at(Mode::Math, first.span.end as usize);
-            let named = matches!(first.kind, K::MathIdent | K::MathText)
+            let named = !spread
+                && matches!(first.kind, K::MathIdent | K::MathText)
                 && after.map(|t| t.kind) == Some(K::Colon);
             if named {
                 let id = self.bump_as(Mode::Math, K::Ident)?;
@@ -1826,14 +1845,17 @@ impl Parser<'_, '_> {
             }
             let value_id = if value.first == NIL {
                 self.missing()?
-            } else if value.first == value.last {
+            } else if value.first == value.last
+                || (self.nodes[value.first as usize].kind == K::Hash
+                    && self.nodes[value.first as usize].next_sibling == value.last)
+            {
                 value.first
             } else {
                 self.group(K::Math, value, before)?
             };
-            let id = if named {
+            let id = if named || spread {
                 self.push(&mut arg, value_id);
-                self.group(K::Named, arg, before)?
+                self.group(if spread { K::Spread } else { K::Named }, arg, before)?
             } else {
                 value_id
             };
@@ -1869,40 +1891,58 @@ impl Parser<'_, '_> {
         let mut c = Chain::EMPTY;
         self.raw_leaf(K::RawDelim, start, (start + width).min(end), &mut c)?;
         let mut pos = (start + width).min(close);
+        let indent = if width >= 3 {
+            raw_indent(&self.source[..close], pos)
+        } else {
+            0
+        };
         if width >= 3 {
             let lang_start = pos;
-            while pos < close && !bytes[pos].is_ascii_whitespace() && bytes[pos] != b'`' {
-                pos += 1;
+            while pos < close {
+                let ch = self.source[pos..close].chars().next().unwrap();
+                if ch.is_whitespace() || ch == '`' {
+                    break;
+                }
+                pos += ch.len_utf8();
             }
             if pos != lang_start {
                 self.raw_leaf(K::RawLang, lang_start, pos, &mut c)?;
             }
-            if pos < close && bytes[pos].is_ascii_whitespace() {
-                let trim_start = pos;
-                if bytes[pos] == b'\r' && bytes.get(pos + 1) == Some(&b'\n') {
-                    pos += 2;
-                } else {
-                    pos += 1;
-                }
+            let trim_start = pos;
+            let line = self.source[pos..close].find(is_newline);
+            if let Some(offset) = line.filter(|&offset| {
+                self.source[pos..pos + offset]
+                    .chars()
+                    .all(char::is_whitespace)
+            }) {
+                pos += offset;
+                pos += raw_newline_len(self.source, pos);
+                pos = raw_trim(self.source, pos, close, indent);
+            } else if let Some(ch) = self.source[pos..close]
+                .chars()
+                .next()
+                .filter(|c| c.is_whitespace())
+            {
+                pos += ch.len_utf8();
+            }
+            if pos != trim_start {
                 self.raw_leaf(K::RawTrimmed, trim_start, pos, &mut c)?;
             }
         }
         let mut text_start = pos;
         while pos < close {
-            if matches!(bytes[pos], b'\n' | b'\r') {
-                if text_start < pos {
-                    self.raw_leaf(K::Text, text_start, pos, &mut c)?;
-                }
+            let ch = self.source[pos..close].chars().next().unwrap();
+            if is_newline(ch) {
+                self.raw_leaf(K::Text, text_start, pos, &mut c)?;
                 let newline_start = pos;
-                if bytes[pos] == b'\r' && bytes.get(pos + 1) == Some(&b'\n') {
-                    pos += 2;
-                } else {
-                    pos += 1;
+                pos += raw_newline_len(self.source, pos);
+                if width >= 3 {
+                    pos = raw_trim(self.source, pos, close, indent);
                 }
                 self.raw_leaf(K::RawTrimmed, newline_start, pos, &mut c)?;
                 text_start = pos;
             } else {
-                pos += 1;
+                pos += ch.len_utf8();
             }
         }
         if text_start < close {
@@ -2024,4 +2064,61 @@ fn assignment_start(kind: K) -> bool {
             | K::LeftBracket
             | K::Dollar
     )
+}
+
+fn raw_newline_len(source: &str, pos: usize) -> usize {
+    if source[pos..].starts_with("\r\n") {
+        2
+    } else {
+        source[pos..].chars().next().map_or(0, char::len_utf8)
+    }
+}
+fn raw_indent(source: &str, mut pos: usize) -> usize {
+    let mut indent = usize::MAX;
+    while let Some(offset) = source[pos..].find(is_newline) {
+        pos += offset;
+        pos += raw_newline_len(source, pos);
+        let mut columns = 0;
+        while let Some(ch) = source[pos..].chars().next() {
+            if !ch.is_whitespace() || is_newline(ch) {
+                break;
+            }
+            columns += 1;
+            pos += ch.len_utf8();
+        }
+        if source[pos..]
+            .chars()
+            .next()
+            .map_or(true, |ch| !is_newline(ch))
+        {
+            indent = indent.min(columns);
+            if indent == 0 {
+                return 0;
+            }
+        }
+    }
+    if indent == usize::MAX {
+        0
+    } else {
+        indent
+    }
+}
+fn raw_trim(source: &str, mut pos: usize, close: usize, indent: usize) -> usize {
+    let mut end = pos;
+    let mut columns = 0;
+    while let Some(ch) = source[end..close].chars().next() {
+        if !ch.is_whitespace() || is_newline(ch) {
+            break;
+        }
+        columns += 1;
+        end += ch.len_utf8();
+        if columns <= indent {
+            pos = end;
+        }
+    }
+    if end == close {
+        close
+    } else {
+        pos
+    }
 }

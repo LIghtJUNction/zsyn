@@ -31,15 +31,7 @@ fn grow<T: Clone>(v: &mut Vec<T>, size: usize, value: T) -> Result<(), ParseErro
     Ok(())
 }
 
-// Estimate structural density from a bounded byte sample. Words and whitespace
-// become leaves; delimiters and operators also create enclosing syntax nodes.
-// The estimate is only a capacity hint: every parse remains checked and retries
-// with a larger arena if the document differs from its initial sample.
-fn initial_nodes(source: &str, limit: usize) -> usize {
-    let sample = &source.as_bytes()[..source.len().min(8192)];
-    if sample.is_empty() {
-        return 1.min(limit);
-    }
+fn dense_nodes(sample: &[u8]) -> usize {
     let mut estimate = 0usize;
     let mut word = false;
     let mut space = false;
@@ -67,6 +59,86 @@ fn initial_nodes(source: &str, limit: usize) -> usize {
             }
         }
     }
+    estimate
+}
+
+// Markup words separated by single spaces form one text node. Count those runs
+// with the actual lexer, while keeping a conservative dense estimate for code
+// and math regions. This bounded sample does not change parsing or its limits.
+fn markup_nodes(sample: &str) -> usize {
+    use crate::{Lexer, SyntaxKind as K};
+    let mut lexer = Lexer::new(sample, Mode::Markup);
+    let mut plain = 0usize;
+    let mut dense = 0usize;
+    while let Some(token) = lexer.next() {
+        if matches!(token.kind, K::Hash | K::Dollar) {
+            let mode = if token.kind == K::Hash {
+                Mode::Code
+            } else {
+                Mode::Math
+            };
+            let mut region = Lexer::at_boundary(sample, mode, token.span.end as usize);
+            let mut end = token.span.end as usize;
+            let mut depth = 0usize;
+            for next in &mut region {
+                end = next.span.end as usize;
+                if mode == Mode::Math && next.kind == K::Dollar {
+                    break;
+                }
+                match next.kind {
+                    K::LeftParen | K::LeftBracket | K::LeftBrace => depth += 1,
+                    K::RightParen | K::RightBracket | K::RightBrace => {
+                        depth = depth.saturating_sub(1)
+                    }
+                    K::Space
+                        if mode == Mode::Code
+                            && depth == 0
+                            && sample[next.span.range()]
+                                .chars()
+                                .any(crate::lexer::is_newline) =>
+                    {
+                        break
+                    }
+                    _ => {}
+                }
+            }
+            dense += dense_nodes(&sample.as_bytes()[token.span.start as usize..end]);
+            lexer.set_position(end);
+        } else {
+            plain += match token.kind {
+                K::Star | K::Underscore | K::RefMarker => 2,
+                K::HeadingMarker | K::ListMarker | K::EnumMarker | K::LeftBracket => 3,
+                K::TermMarker => 4,
+                K::Raw => {
+                    5 + 2 * sample.as_bytes()[token.span.range()]
+                        .iter()
+                        .filter(|&&byte| byte == b'\n' || byte == b'\r')
+                        .count()
+                }
+                _ => 1,
+            };
+        }
+    }
+    dense + (plain * 9).div_ceil(8)
+}
+
+// Capacity hints use at most 8 KiB. Short sources avoid the additional lexical
+// pass; all sources retry with checked growth if their density changes later.
+fn initial_nodes(source: &str, mode: Mode, limit: usize) -> usize {
+    let mut end = source.len().min(8192);
+    while !source.is_char_boundary(end) {
+        end -= 1;
+    }
+    let sample = &source[..end];
+    if sample.is_empty() {
+        return 1.min(limit);
+    }
+    let dense = dense_nodes(sample.as_bytes());
+    let estimate = if mode == Mode::Markup && source.len() > 8192 && dense <= sample.len() / 2 {
+        markup_nodes(sample)
+    } else {
+        dense
+    };
     source
         .len()
         .saturating_mul(estimate)
@@ -95,7 +167,7 @@ impl OwnedTree {
         let mut diagnostics = Vec::new();
         grow(
             &mut nodes,
-            initial_nodes(&source, limits.max_nodes),
+            initial_nodes(&source, mode, limits.max_nodes),
             Node::EMPTY,
         )?;
         grow(
