@@ -1,4 +1,5 @@
 //! Lossless recursive-descent parser with a Pratt expression core.
+use crate::lexer::is_newline;
 use crate::{
     Diagnostic, ErrorKind, Lexer, Limits, Mode, Node, ParseError, ParseInfo, Span, SyntaxKind as K,
     Token,
@@ -141,7 +142,9 @@ struct Parser<'s, 'a> {
     pattern_replay: bool,
     steps: usize,
     cached: Option<(Mode, Token)>,
-    ahead_cached: Option<(Mode, usize, Option<Token>, bool)>,
+    // The next significant token is valid throughout its preceding trivia.
+    // Keep the last newline offset so consuming trivia cannot leave a stale flag.
+    ahead_cached: Option<(Mode, usize, Option<Token>, u32)>,
 }
 
 impl Parser<'_, '_> {
@@ -191,29 +194,40 @@ impl Parser<'_, '_> {
     }
     #[inline]
     fn ahead(&mut self, mode: Mode) -> (Option<Token>, bool) {
-        if let Some((m, pos, token, newline)) = self.ahead_cached {
-            if m == mode && pos == self.pos {
-                return (token, newline);
+        if let Some((m, start, token, last_newline)) = self.ahead_cached {
+            let end = token.map_or(self.source.len(), |t| t.span.start as usize);
+            if m == mode && start <= self.pos && self.pos <= end {
+                return (
+                    token,
+                    last_newline != NIL && last_newline as usize >= self.pos,
+                );
             }
         }
         let mut pos = self.pos;
-        let mut newline = false;
+        let mut last_newline = NIL;
+        let mut work = 0usize;
         let mut next = self.peek(mode);
         while let Some(t) = next {
             if !trivia(t.kind) {
                 break;
             }
-            newline |= self.source[t.span.start as usize..t.span.end as usize]
-                .chars()
-                .any(is_newline);
+            work += 1;
+            if let Some(offset) =
+                self.source[t.span.start as usize..t.span.end as usize].rfind(is_newline)
+            {
+                last_newline = t.span.start + offset as u32;
+            }
             if t.span.end as usize <= pos {
                 break;
             }
             pos = t.span.end as usize;
             next = self.token_at(mode, pos);
         }
-        self.ahead_cached = Some((mode, self.pos, next, newline));
-        (next, newline)
+        // The next progress/node check enforces the budget. Charging lookahead
+        // also makes repeated trivia scanning observable in resource tests.
+        self.steps = self.steps.saturating_add(work);
+        self.ahead_cached = Some((mode, self.pos, next, last_newline));
+        (next, last_newline != NIL)
     }
     fn report(&mut self, kind: ErrorKind, span: Span) -> Result<(), ParseError> {
         if self.errors >= self.limits.max_diagnostics {
@@ -1530,6 +1544,7 @@ impl Parser<'_, '_> {
     fn math_expr_inner(&mut self, min: u8, stop_attach: Option<K>) -> Result<u32, ParseError> {
         let mut lhs = self.math_primary()?;
         let mut first_attach = None;
+        let mut attach_tail = NIL;
         loop {
             self.tick()?;
             let (next, _) = self.ahead(Mode::Math);
@@ -1583,10 +1598,12 @@ impl Parser<'_, '_> {
                 let mut c = self.single(lhs);
                 self.take(Mode::Math, &mut c)?;
                 lhs = self.group(K::MathAttach, c, self.pos)?;
+                attach_tail = c.last;
                 first_attach = Some(K::MathPrimes);
                 continue;
             }
-            if Some(t.kind) == stop_attach {
+            let attached = matches!(first_attach, Some(K::Underscore | K::Hat));
+            if Some(t.kind) == stop_attach && !attached {
                 break;
             }
             if matches!(t.kind, K::Underscore | K::Hat) && min <= 3 {
@@ -1594,12 +1611,10 @@ impl Parser<'_, '_> {
                     && first_attach != Some(t.kind)
                     && lhs_kind == K::MathAttach;
                 let mut c = if append {
-                    let first = self.nodes[lhs as usize].first_child;
-                    let mut last = first;
-                    while self.nodes[last as usize].next_sibling != NIL {
-                        last = self.nodes[last as usize].next_sibling;
+                    Chain {
+                        first: self.nodes[lhs as usize].first_child,
+                        last: attach_tail,
                     }
-                    Chain { first, last }
                 } else {
                     self.single(lhs)
                 };
@@ -1619,27 +1634,38 @@ impl Parser<'_, '_> {
                     self.missing()?
                 } else {
                     self.spaces(Mode::Math, &mut c)?;
-                    self.math_expr(
-                        3,
+                    // Reserve the other slot only for the first argument.
+                    // Once both slots belong to this base, later attachments
+                    // nest inside the second argument (x_1^(2_3)).
+                    let stop = if attached {
+                        None
+                    } else {
                         Some(if t.kind == K::Hat {
                             K::Underscore
                         } else {
                             K::Hat
-                        }),
-                    )?
+                        })
+                    };
+                    self.math_expr(3, stop)?
                 };
                 self.unparen(rhs);
                 self.push(&mut c, rhs);
                 if append {
                     self.nodes[lhs as usize].span.end = self.nodes[c.last as usize].span.end;
-                    let mut child = c.first;
+                    // Existing children already have the right parent. Visiting
+                    // only newly appended children keeps alternating _/^ linear.
+                    let mut child = self.nodes[attach_tail as usize].next_sibling;
+                    let mut work = 0usize;
                     while child != NIL {
                         self.nodes[child as usize].parent = lhs;
                         child = self.nodes[child as usize].next_sibling;
+                        work += 1;
                     }
+                    self.steps = self.steps.saturating_add(work);
                 } else {
                     lhs = self.group(K::MathAttach, c, self.pos)?;
                 }
+                attach_tail = c.last;
                 first_attach = Some(t.kind);
                 continue;
             }
@@ -1991,9 +2017,6 @@ fn trivia(kind: K) -> bool {
 }
 fn closing(kind: K) -> bool {
     matches!(kind, K::RightParen | K::RightBracket | K::RightBrace)
-}
-fn is_newline(c: char) -> bool {
-    matches!(c, '\n' | '\r' | '\u{85}' | '\u{2028}' | '\u{2029}')
 }
 fn binding(kind: K) -> Option<(u8, u8)> {
     Some(match kind {

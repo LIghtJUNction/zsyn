@@ -6,5 +6,10 @@ Identifier classification data is generated from Unicode 18.0.0
 DerivedCoreProperties.txt, distributed under LICENSE-UNICODE.
 https://www.unicode.org/Public/18.0.0/ucd/DerivedCoreProperties.txt
 
+Extended grapheme cluster data also uses Unicode 18.0.0 GraphemeBreakProperty.txt
+and emoji-data.txt under the same Unicode License V3.
+https://www.unicode.org/Public/18.0.0/ucd/auxiliary/GraphemeBreakProperty.txt
+https://www.unicode.org/Public/18.0.0/ucd/emoji/emoji-data.txt
+
 Project code is available under either LICENSE-MIT or LICENSE-APACHE.
 

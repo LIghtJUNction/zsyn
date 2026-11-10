@@ -112,8 +112,8 @@ initialized tree. Caller buffer sizes are hard limits in addition to `Limits`:
 | Recursive parser depth | 96, hard ceiling 128 |
 | Parser work steps | 134,217,728 |
 
-Set smaller limits for constrained devices. Depth counts parser frames rather
-than delimiters, so one nested expression can consume several frames. Source
+Set smaller limits for constrained devices. Depth counts parser nesting levels;
+one nested expression can consume several levels. Source
 length is also restricted to the `u32` byte-span domain. The owning interface
 uses fallible reservation; the core requires no allocator at all.
 
@@ -139,7 +139,7 @@ workloads should be used for speed claims.
 cargo test --all-features
 cargo test --manifest-path comparison/Cargo.toml
 cargo test --manifest-path comparison/Cargo.toml --no-default-features --test core
-cargo +nightly miri test --manifest-path comparison/Cargo.toml --no-default-features --test core
+cargo +nightly miri test --manifest-path comparison/Cargo.toml --no-default-features --test core --test incremental --test resources
 RUSTFLAGS='-C target-cpu=x86-64' cargo run --release \
   --manifest-path comparison/Cargo.toml --bin benchmark
 ```
@@ -151,14 +151,17 @@ rustfmt, clippy, documentation tests, Miri, dependency/package checks,
 `cargo package`, and `cargo publish --dry-run`.
 
 To release, open **Actions → Release → Run workflow** on the default branch and
-select `none`, `patch`, `minor`, or `major`. The same workflow calculates the
+select `none`, `patch`, `minor`, or `major`. A default-branch push that changes
+`Cargo.toml` also checks the committed version and releases it if unpublished.
+The same workflow calculates the
 candidate version, runs the complete reusable CI workflow, updates the manifest
 and lockfiles, pushes the version commit and annotated tag, publishes to
 crates.io, verifies its package checksum, and creates the GitHub Release.
 
 The release job reads `CARGO_REGISTRY_TOKEN` from GitHub Actions secrets. PRs,
-forks, and non-default branches cannot publish. An existing registry version is
-rejected. Release serialization and same-run recovery protect against duplicate
+forks, and non-default branches cannot publish. An automatic check skips an
+already published version; a manual release requires a new version or a retry
+of the same interrupted run. Release serialization and same-run recovery protect against duplicate
 or partially completed publication; generated tags do not need to trigger
 another workflow.
 

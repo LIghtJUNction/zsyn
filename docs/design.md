@@ -7,7 +7,8 @@ Each 24-byte `Node` contains its syntax kind, UTF-8 byte range, first child,
 next sibling, and parent. All links are indices into the initialized arena.
 Source bytes remain in the caller's `str`; syntax nodes do not own text.
 
-Composite nodes are allocated after their children. Pratt expression parsing can
+Composite nodes are initially allocated after their children; a mathematical
+attachment can append additional children later. Pratt expression parsing can
 therefore wrap an existing operand in a binary expression, call, or attachment
 without moving its descendants. Iteration follows explicit links, so walking
 the tree does not consume a recursive call stack or allocate a traversal buffer.
@@ -43,14 +44,18 @@ The production parser has no dependency on the oracle or on a Unicode crate.
 The source byte limit is checked before lexing. Node and diagnostic writes are
 checked against both the supplied slice length and the corresponding explicit
 budget. Recursive parser entry checks the configured depth budget and a hard
-ceiling of 128 frames. Node creation and parser progress consume a work budget.
+ceiling of 128 parser nesting levels. Node creation, parser progress, trivia
+lookahead visits, and attachment reparenting consume a work budget. Lookahead
+caches the remaining trivia interval and its last newline, so consuming one
+comment does not scan the entire remaining comment sequence again. Attachment
+updates retain the child tail and visit only newly appended children.
 Returned parse metadata records observed depth and work, allowing later edits
 to verify tighter limits before reusing an existing tree.
 
 Recoverable syntax errors produce `Diagnostic` values and error nodes. Exhausted
 resources produce `ParseError` instead of a partially valid tree. UTF-8 byte
-input is validated before conversion to `str`. Source offsets, edits, and node
-links are checked before they can reach an indexing operation.
+input is validated before conversion to `str`. Public source and edit boundaries
+are validated; internal links are constructed from initialized arena indices.
 
 The optional `OwnedTree` estimates capacity from a bounded sample, reserves
 memory fallibly, and grows an arena when the estimate is insufficient. Its

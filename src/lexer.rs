@@ -9,6 +9,10 @@ pub struct Token {
 }
 
 /// A mode-aware, allocation-free lexer. Nested mode transitions are driven by the parser.
+///
+/// Inputs with at least `u32::MAX` bytes cannot be represented by [`Span`].
+/// Instead of reading them, the iterator emits one empty error token at byte
+/// zero with [`ErrorKind::SourceLimit`], then ends.
 #[derive(Clone, Debug)]
 pub struct Lexer<'s> {
     source: &'s str,
@@ -128,7 +132,7 @@ impl<'s> Lexer<'s> {
                 self.pos += c.len_utf8();
                 c
             };
-            if is_newline(c) && !(c == '\n' && cr) {
+            if newlines < 2 && is_newline(c) && !(c == '\n' && cr) {
                 newlines += 1;
             }
             cr = c == '\r';

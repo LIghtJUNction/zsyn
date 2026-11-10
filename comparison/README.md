@@ -11,7 +11,7 @@ The gate establishes equivalence for the exact tested documents. It does not est
 ```sh
 cargo test --manifest-path comparison/Cargo.toml
 cargo test --manifest-path comparison/Cargo.toml --no-default-features --test core
-cargo +nightly miri test --manifest-path comparison/Cargo.toml --no-default-features --test core
+cargo +nightly miri test --manifest-path comparison/Cargo.toml --no-default-features --test core --test incremental --test resources
 ```
 
 `core.rs` imports only `std` and `zsyn`, so the MSRV job can compile it directly with `rustc --test` without resolving a newer oracle dependency graph. The root crate retains an empty third-party dependency tree in every feature configuration.

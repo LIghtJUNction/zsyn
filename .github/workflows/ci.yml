@@ -60,7 +60,7 @@ jobs:
           cargo test --locked --no-default-features
           cargo test --locked --all-features
           cargo test --locked --manifest-path comparison/Cargo.toml
-          cargo test --locked --manifest-path comparison/Cargo.toml --no-default-features --test core --test incremental
+          cargo test --locked --manifest-path comparison/Cargo.toml --no-default-features --test core --test incremental --test resources
       - name: Formatting and lints
         run: |
           cargo fmt --all --check
@@ -105,6 +105,8 @@ jobs:
           target/msrv-core-tests
           rustc +1.74.0 --edition=2021 --test comparison/tests/incremental.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-incremental-tests
           target/msrv-incremental-tests
+          rustc +1.74.0 --edition=2021 --test comparison/tests/resources.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-resource-tests
+          target/msrv-resource-tests
           cargo +1.74.0 package --locked --allow-dirty
 
   targets:
@@ -165,4 +167,4 @@ jobs:
       - name: Check parser and incremental updates
         env:
           MIRIFLAGS: -Zmiri-strict-provenance
-        run: cargo +nightly miri test --locked --manifest-path comparison/Cargo.toml --no-default-features --test core --test incremental
+        run: cargo +nightly miri test --locked --manifest-path comparison/Cargo.toml --no-default-features --test core --test incremental --test resources
