@@ -6,6 +6,7 @@ rust-version = "1.74"
 description = "Zero-dependency, bounded, no_std syntax trees for Typst markup, code, and math"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/LIghtJUNction/zsyn"
+documentation = "https://docs.rs/zsyn"
 readme = "README.md"
 keywords = ["typst", "parser", "no-std", "incremental", "syntax"]
 categories = ["parser-implementations", "no-std", "text-processing"]

@@ -1,0 +1,5 @@
+measurement=timing
+oracle=typst-syntax 0.15.1; samples=9 median; calibration>=15ms; source bytes use UTF-8
+core arena creation is outside timed region; owned includes source ownership/allocation; full parse results are dropped inside timing
+allocation byte counts are requested bytes, not RSS; edit allocation counts exclude construction; edit peaks include the retained document
+allocation_instrumented=false; first edits use 8 fresh independently parsed trees per sample outside timing

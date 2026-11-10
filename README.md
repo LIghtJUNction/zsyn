@@ -130,6 +130,8 @@ documents; one-character edits; deterministic random Unicode input; boundary
 conditions; invalid UTF-8; resource limits; and incremental/full-parse equality.
 Unicode identifier classes are compared across every valid scalar value.
 
+See the [measured performance report](docs/performance.md) for the recorded
+latencies, throughput, requested heap usage, repeated runs, and remaining limits.
 See [`comparison/README.md`](comparison/README.md) for the exact compiler flags,
 corpus definitions, timing protocol, and memory accounting. Performance depends
 on the source, CPU, allocation policy, and edit shape. Only measured, equivalent
