@@ -1,8 +1,8 @@
 [package]
 name = "zsyn"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
-rust-version = "1.74"
+rust-version = "1.74" # MSRV; CI also verifies Rust 1.99.1
 description = "Zero-dependency, bounded, no_std syntax trees for Typst markup, code, and math"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/LIghtJUNction/zsyn"
