@@ -1,0 +1,7 @@
+Typst syntax test fixtures
+Copyright (c) 2019-2026 Typst GmbH and contributors.
+Source: https://github.com/typst/typst/tree/v0.15.1/tests/suite/syntax
+Revision: 9dfd3a08500b7896045f907433cf7b4b02434fad
+The .typ fixtures are unmodified and licensed under Apache-2.0.
+The full license is included as LICENSE-APACHE in this directory.
+These fixtures are excluded from the published zsyn crate.

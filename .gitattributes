@@ -1,0 +1,10 @@
+* text=auto
+*.rs text eol=lf
+*.typ text eol=lf
+*.txt text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
+*.lock text eol=lf
+*.py text eol=lf
+*.csv text eol=lf

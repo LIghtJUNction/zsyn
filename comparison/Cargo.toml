@@ -9,6 +9,7 @@ publish = false
 [features]
 default = ["oracle"]
 oracle = ["dep:typst-syntax"]
+allocation-stats = []
 
 [dependencies]
 zsyn = { path = "..", features = ["alloc"] }

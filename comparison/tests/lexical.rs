@@ -210,6 +210,13 @@ fn lexical_boundaries_and_utf8_modes_match() {
         "[x]",
         "{x}",
         "|x|",
+        "<~~>",
+        "<--|",
+        "|-->",
+        "<-|",
+        "::",
+        "<>",
+        "~~",
     ];
     let mut failures = Vec::new();
     for (mode, inputs) in [

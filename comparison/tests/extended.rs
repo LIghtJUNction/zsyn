@@ -43,6 +43,16 @@ fn mode_boundaries_literals_and_combinations() {
         (Mode::Markup, "*unfinished"),
         (Mode::Markup, "_unfinished"),
         (Mode::Markup, "$unfinished"),
+        (Mode::Code, "_ => 1"),
+        (Mode::Code, "(_, a) => a"),
+        (Mode::Code, "((a,b), _) => a"),
+        (Mode::Code, "let (a: (b,c)) = d"),
+        (Mode::Code, "let 1 = 2"),
+        (Mode::Math, "( x"),
+        (Mode::Math, ".5"),
+        (Mode::Code, "import \"f\": (q, x)"),
+        (Mode::Code, "import \"f\": ( q,\n x, )"),
+        (Mode::Markup, "#import \"f\": (q, x)\n#q"),
     ];
     let mut failures = Vec::new();
     for (mode, source) in cases {

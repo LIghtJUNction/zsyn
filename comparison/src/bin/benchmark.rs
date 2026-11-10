@@ -1,76 +1,10 @@
 //! Exact-CST-gated latency and allocation measurements. See comparison/README.md.
-use std::alloc::{GlobalAlloc, Layout, System};
 use std::hint::black_box;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use zsyn::{parse, Diagnostic, Limits, Mode, Node, OwnedTree};
 use zsyn_comparison::{
     canonical, compare_records, fnv1a, oracle_canonical, oracle_parse, workloads, ORACLE_VERSION,
 };
-
-struct CountingAllocator;
-static ENABLED: AtomicBool = AtomicBool::new(false);
-static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
-static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
-static LIVE: AtomicUsize = AtomicUsize::new(0);
-static PEAK: AtomicUsize = AtomicUsize::new(0);
-
-fn count_allocate(bytes: usize) {
-    if ENABLED.load(Ordering::Relaxed) {
-        ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
-        ALLOCATED.fetch_add(bytes, Ordering::Relaxed);
-        let live = LIVE.fetch_add(bytes, Ordering::Relaxed) + bytes;
-        PEAK.fetch_max(live, Ordering::Relaxed);
-    }
-}
-fn count_free(bytes: usize) {
-    if ENABLED.load(Ordering::Relaxed) {
-        let mut before = LIVE.load(Ordering::Relaxed);
-        loop {
-            match LIVE.compare_exchange_weak(
-                before,
-                before.saturating_sub(bytes),
-                Ordering::Relaxed,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => break,
-                Err(current) => before = current,
-            }
-        }
-    }
-}
-// This instrumentation is confined to this unpublished comparison executable.
-// Each method delegates to System with the exact original pointer/layout contract.
-unsafe impl GlobalAlloc for CountingAllocator {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc(layout) };
-        if !pointer.is_null() {
-            count_allocate(layout.size());
-        }
-        pointer
-    }
-    unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
-        let pointer = unsafe { System.alloc_zeroed(layout) };
-        if !pointer.is_null() {
-            count_allocate(layout.size());
-        }
-        pointer
-    }
-    unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
-        count_free(layout.size());
-        unsafe { System.dealloc(pointer, layout) };
-    }
-    unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
-        let result = unsafe { System.realloc(pointer, layout, new_size) };
-        if !result.is_null() {
-            count_free(layout.size());
-            count_allocate(new_size);
-        }
-        result
-    }
-}
-#[global_allocator]
-static GLOBAL: CountingAllocator = CountingAllocator;
 
 #[derive(Clone, Copy, Default)]
 struct AllocationStats {
@@ -78,25 +12,137 @@ struct AllocationStats {
     bytes: usize,
     peak: usize,
 }
-fn allocations<T>(f: impl FnOnce() -> T) -> (T, AllocationStats) {
-    ALLOCATIONS.store(0, Ordering::Relaxed);
-    ALLOCATED.store(0, Ordering::Relaxed);
-    LIVE.store(0, Ordering::Relaxed);
-    PEAK.store(0, Ordering::Relaxed);
-    ENABLED.store(true, Ordering::SeqCst);
-    let value = f();
-    ENABLED.store(false, Ordering::SeqCst);
-    (
-        value,
-        AllocationStats {
+#[cfg(feature = "allocation-stats")]
+mod counting {
+    use super::AllocationStats;
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    struct CountingAllocator;
+    static ENABLED: AtomicBool = AtomicBool::new(false);
+    static ALLOCATIONS: AtomicUsize = AtomicUsize::new(0);
+    static ALLOCATED: AtomicUsize = AtomicUsize::new(0);
+    static LIVE: AtomicUsize = AtomicUsize::new(0);
+    static PEAK: AtomicUsize = AtomicUsize::new(0);
+
+    fn count_allocate(bytes: usize) {
+        if ENABLED.load(Ordering::Relaxed) {
+            ALLOCATIONS.fetch_add(1, Ordering::Relaxed);
+            ALLOCATED.fetch_add(bytes, Ordering::Relaxed);
+            let live = LIVE.fetch_add(bytes, Ordering::Relaxed) + bytes;
+            PEAK.fetch_max(live, Ordering::Relaxed);
+        }
+    }
+    fn count_free(bytes: usize) {
+        if ENABLED.load(Ordering::Relaxed) {
+            let mut before = LIVE.load(Ordering::Relaxed);
+            loop {
+                match LIVE.compare_exchange_weak(
+                    before,
+                    before.saturating_sub(bytes),
+                    Ordering::Relaxed,
+                    Ordering::Relaxed,
+                ) {
+                    Ok(_) => break,
+                    Err(current) => before = current,
+                }
+            }
+        }
+    }
+    // This instrumentation is confined to this unpublished comparison executable.
+    // Each method delegates to System with the exact original pointer/layout contract.
+    unsafe impl GlobalAlloc for CountingAllocator {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc(layout) };
+            if !pointer.is_null() {
+                count_allocate(layout.size());
+            }
+            pointer
+        }
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            let pointer = unsafe { System.alloc_zeroed(layout) };
+            if !pointer.is_null() {
+                count_allocate(layout.size());
+            }
+            pointer
+        }
+        unsafe fn dealloc(&self, pointer: *mut u8, layout: Layout) {
+            count_free(layout.size());
+            unsafe { System.dealloc(pointer, layout) };
+        }
+        unsafe fn realloc(&self, pointer: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let result = unsafe { System.realloc(pointer, layout, new_size) };
+            if !result.is_null() {
+                count_free(layout.size());
+                count_allocate(new_size);
+            }
+            result
+        }
+    }
+    #[global_allocator]
+    static GLOBAL: CountingAllocator = CountingAllocator;
+
+    pub(super) fn allocations<T>(f: impl FnOnce() -> T) -> (T, AllocationStats) {
+        ALLOCATIONS.store(0, Ordering::Relaxed);
+        ALLOCATED.store(0, Ordering::Relaxed);
+        LIVE.store(0, Ordering::Relaxed);
+        PEAK.store(0, Ordering::Relaxed);
+        ENABLED.store(true, Ordering::SeqCst);
+        let value = f();
+        ENABLED.store(false, Ordering::SeqCst);
+        (
+            value,
+            AllocationStats {
+                count: ALLOCATIONS.load(Ordering::Relaxed),
+                bytes: ALLOCATED.load(Ordering::Relaxed),
+                peak: PEAK.load(Ordering::Relaxed),
+            },
+        )
+    }
+
+    pub(super) fn edit_allocations<T, R>(
+        setup: impl FnOnce() -> T,
+        edit: impl FnOnce(&mut T) -> R,
+    ) -> (T, R, AllocationStats) {
+        ALLOCATIONS.store(0, Ordering::Relaxed);
+        ALLOCATED.store(0, Ordering::Relaxed);
+        LIVE.store(0, Ordering::Relaxed);
+        PEAK.store(0, Ordering::Relaxed);
+        ENABLED.store(true, Ordering::SeqCst);
+        let mut value = setup();
+        ALLOCATIONS.store(0, Ordering::Relaxed);
+        ALLOCATED.store(0, Ordering::Relaxed);
+        PEAK.store(LIVE.load(Ordering::Relaxed), Ordering::Relaxed);
+        let result = edit(&mut value);
+        ENABLED.store(false, Ordering::SeqCst);
+        let stats = AllocationStats {
             count: ALLOCATIONS.load(Ordering::Relaxed),
             bytes: ALLOCATED.load(Ordering::Relaxed),
             peak: PEAK.load(Ordering::Relaxed),
-        },
-    )
+        };
+        (value, result, stats)
+    }
+}
+#[cfg(feature = "allocation-stats")]
+use counting::{allocations, edit_allocations};
+#[cfg(not(feature = "allocation-stats"))]
+fn allocations<T>(f: impl FnOnce() -> T) -> (T, AllocationStats) {
+    (f(), AllocationStats::default())
+}
+#[cfg(not(feature = "allocation-stats"))]
+fn edit_allocations<T, R>(
+    setup: impl FnOnce() -> T,
+    edit: impl FnOnce(&mut T) -> R,
+) -> (T, R, AllocationStats) {
+    let mut value = setup();
+    let result = edit(&mut value);
+    (value, result, AllocationStats::default())
 }
 
 fn median_ns(mut f: impl FnMut()) -> f64 {
+    if cfg!(feature = "allocation-stats") {
+        f();
+        return f64::NAN;
+    }
     for _ in 0..8 {
         f();
     }
@@ -123,6 +169,24 @@ fn median_ns(mut f: impl FnMut()) -> f64 {
     samples[4]
 }
 
+fn first_edit_ns<T>(mut setup: impl FnMut() -> T, mut edit: impl FnMut(&mut T)) -> f64 {
+    if cfg!(feature = "allocation-stats") {
+        edit(&mut setup());
+        return f64::NAN;
+    }
+    let mut samples = [0.0; 9];
+    for sample in &mut samples {
+        let mut fresh: Vec<T> = (0..8).map(|_| setup()).collect();
+        let start = Instant::now();
+        for tree in &mut fresh {
+            edit(black_box(tree));
+        }
+        *sample = start.elapsed().as_nanos() as f64 / fresh.len() as f64;
+    }
+    samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    samples[4]
+}
+
 struct Row<'a> {
     name: &'a str,
     operation: &'a str,
@@ -138,20 +202,33 @@ struct Row<'a> {
     hash: u64,
 }
 fn print_row(row: Row<'_>) {
-    let mib_s = row.bytes as f64 / (1024.0 * 1024.0) / (row.ns / 1e9);
+    let instrumented = cfg!(feature = "allocation-stats");
+    let times = if instrumented {
+        ",,".to_owned()
+    } else {
+        let mib_s = row.bytes as f64 / (1024.0 * 1024.0) / (row.ns / 1e9);
+        format!(
+            "{:.2},{:.2},{:.3}",
+            row.ns,
+            mib_s,
+            row.reference_ns / row.ns
+        )
+    };
+    let memory = if instrumented {
+        format!("{},{},{}", row.alloc.count, row.alloc.bytes, row.alloc.peak)
+    } else {
+        ",,".to_owned()
+    };
     println!(
-        "{},{},{},true,{},{},{:.2},{:.2},{:.3},{},{},{},{},{},{},{:016x}",
+        "{},{},{},true,{},{},{},{},{},{},{},{},{:016x}",
         row.name,
         row.operation,
         row.engine,
+        instrumented,
         row.bytes,
         row.nodes,
-        row.ns,
-        mib_s,
-        row.reference_ns / row.ns,
-        row.alloc.count,
-        row.alloc.bytes,
-        row.alloc.peak,
+        times,
+        memory,
         row.arena,
         row.reserved,
         row.reparsed,
@@ -160,10 +237,19 @@ fn print_row(row: Row<'_>) {
 }
 
 fn main() {
+    eprintln!(
+        "measurement={}",
+        if cfg!(feature = "allocation-stats") {
+            "memory"
+        } else {
+            "timing"
+        }
+    );
     eprintln!("oracle=typst-syntax {ORACLE_VERSION}; samples=9 median; calibration>=15ms; source bytes use UTF-8");
     eprintln!("core arena creation is outside timed region; owned includes source ownership/allocation; full parse results are dropped inside timing");
-    eprintln!("allocation byte counts are requested bytes, not RSS; incremental allocation peaks are additional allocations during edit");
-    println!("workload,operation,engine,equivalent,bytes,nodes,median_ns,mib_s,speedup_vs_typst,heap_allocations,allocated_bytes,peak_live_bytes,retained_arena_bytes,reserved_bytes,reparsed_bytes,source_fnv1a");
+    eprintln!("allocation byte counts are requested bytes, not RSS; edit allocation counts exclude construction; edit peaks include the retained document");
+    eprintln!("allocation_instrumented={}; first edits use 8 fresh independently parsed trees per sample outside timing", cfg!(feature = "allocation-stats"));
+    println!("workload,operation,engine,equivalent,allocation_instrumented,bytes,nodes,median_ns,mib_s,speedup_vs_typst,heap_allocations,allocated_bytes,peak_live_bytes,retained_arena_bytes,reserved_bytes,reparsed_bytes,source_fnv1a");
     let limits = Limits::default();
     for workload in workloads() {
         let source = workload.source.as_str();
@@ -175,12 +261,15 @@ fn main() {
                 "{}: benchmark withheld: full CST mismatch: {error}",
                 workload.name
             );
-            println!(
-                "{},full,none,false,{},0,0,0,0,0,0,0,0,0,0,{:016x}",
-                workload.name,
-                source.len(),
-                fnv1a(source.as_bytes())
-            );
+            let mut fields = vec![String::new(); 17];
+            fields[0] = workload.name.to_owned();
+            fields[1] = "full".to_owned();
+            fields[2] = "none".to_owned();
+            fields[3] = "false".to_owned();
+            fields[4] = cfg!(feature = "allocation-stats").to_string();
+            fields[5] = source.len().to_string();
+            fields[16] = format!("{:016x}", fnv1a(source.as_bytes()));
+            println!("{}", fields.join(","));
             continue;
         }
         let node_count = ours.as_tree().nodes().len();
@@ -276,14 +365,29 @@ fn main() {
             oracle_canonical(typst_edit.root()),
             oracle_canonical(&oracle_after)
         );
+        let first_reference_ns = first_edit_ns(
+            || typst_syntax::Source::detached(source),
+            |tree| {
+                black_box(tree.edit(black_box(at..at + 1), black_box(replacement)));
+            },
+        );
+        let first_ns = first_edit_ns(
+            || OwnedTree::parse(source, Mode::Markup, limits).unwrap(),
+            |tree| {
+                black_box(
+                    tree.edit(black_box(at..at + 1), black_box(replacement), limits)
+                        .unwrap(),
+                );
+            },
+        );
         let mut flip = false;
-        let edit_reference_ns = median_ns(|| {
+        let hot_reference_ns = median_ns(|| {
             let text = if flip { replacement } else { original };
             flip = !flip;
             black_box(typst_edit.edit(black_box(at..at + 1), black_box(text)));
         });
         let mut flip = false;
-        let edit_ns = median_ns(|| {
+        let hot_ns = median_ns(|| {
             let text = if flip { replacement } else { original };
             flip = !flip;
             black_box(
@@ -292,24 +396,67 @@ fn main() {
                     .unwrap(),
             );
         });
-        let mut zsyn_sample = OwnedTree::parse(source, Mode::Markup, limits).unwrap();
-        let mut typst_sample = typst_syntax::Source::detached(source);
-        let (_, zalloc) =
-            allocations(|| zsyn_sample.edit(at..at + 1, replacement, limits).unwrap());
-        let (_, talloc) = allocations(|| typst_sample.edit(at..at + 1, replacement));
-        for (engine, ns, stats, arena, reserve, reparsed) in [
+        let (zsyn_sample, _, zalloc_first) = edit_allocations(
+            || OwnedTree::parse(source, Mode::Markup, limits).unwrap(),
+            |tree| tree.edit(at..at + 1, replacement, limits).unwrap(),
+        );
+        let (_, _, talloc_first) = edit_allocations(
+            || typst_syntax::Source::detached(source),
+            |tree| tree.edit(at..at + 1, replacement),
+        );
+        let (_, _, zalloc_hot) = edit_allocations(
+            || {
+                let mut tree = OwnedTree::parse(source, Mode::Markup, limits).unwrap();
+                tree.edit(at..at + 1, replacement, limits).unwrap();
+                tree
+            },
+            |tree| tree.edit(at..at + 1, original, limits).unwrap(),
+        );
+        let (_, _, talloc_hot) = edit_allocations(
+            || {
+                let mut tree = typst_syntax::Source::detached(source);
+                tree.edit(at..at + 1, replacement);
+                tree
+            },
+            |tree| tree.edit(at..at + 1, original),
+        );
+        for (operation, engine, ns, reference_ns, stats, arena, reserve, reparsed) in [
             (
+                "edit-first",
                 "typst-Source",
-                edit_reference_ns,
-                talloc,
+                first_reference_ns,
+                first_reference_ns,
+                talloc_first,
                 0,
                 0,
                 trange.len(),
             ),
             (
+                "edit-first",
                 "zsyn-OwnedTree",
-                edit_ns,
-                zalloc,
+                first_ns,
+                first_reference_ns,
+                zalloc_first,
+                zsyn_sample.as_tree().storage_bytes(),
+                zsyn_sample.storage_capacity_bytes(),
+                zstats.reparsed.len() as usize,
+            ),
+            (
+                "edit-hot",
+                "typst-Source",
+                hot_reference_ns,
+                hot_reference_ns,
+                talloc_hot,
+                0,
+                0,
+                trange.len(),
+            ),
+            (
+                "edit-hot",
+                "zsyn-OwnedTree",
+                hot_ns,
+                hot_reference_ns,
+                zalloc_hot,
                 zsyn_sample.as_tree().storage_bytes(),
                 zsyn_sample.storage_capacity_bytes(),
                 zstats.reparsed.len() as usize,
@@ -317,12 +464,12 @@ fn main() {
         ] {
             print_row(Row {
                 name: workload.name,
-                operation: "edit",
+                operation,
                 engine,
                 bytes: source.len(),
                 nodes: node_count,
                 ns,
-                reference_ns: edit_reference_ns,
+                reference_ns,
                 alloc: stats,
                 arena,
                 reserved: reserve,

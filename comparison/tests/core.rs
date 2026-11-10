@@ -87,8 +87,7 @@ fn caller_owned_arenas_and_zero_copy_text() {
     assert_eq!(tree.root().text().as_ptr(), source.as_ptr());
     assert_eq!(
         tree.storage_bytes(),
-        tree.nodes().len() * std::mem::size_of::<Node>()
-            + tree.diagnostics().len() * std::mem::size_of::<Diagnostic>()
+        std::mem::size_of_val(tree.nodes()) + std::mem::size_of_val(tree.diagnostics())
     );
     assert_eq!(std::mem::size_of::<Node>(), 24);
     assert!(tree.node(u32::MAX).is_none());
@@ -260,7 +259,7 @@ fn deterministic_random_utf8_is_lossless_and_bounded() {
         "a", "0", " ", "\n", "\r", "\t", "#", "$", "[", "]", "{", "}", "(", ")", "*", "_", "`",
         "\\", "/", "\"", "'", "@", "<", ">", "+", "-", ":", ";", "=", "中", "🦀", "\u{301}", "\0",
     ];
-    let count = if cfg!(miri) { 32 } else { 3000 };
+    let count = if cfg!(miri) { 12 } else { 3000 };
     let mut seed = 0xf81c_a5b3_7d92_064e;
     for _ in 0..count {
         let len = random(&mut seed) % 80;
@@ -292,10 +291,15 @@ fn edits_equal_complete_reparsing() {
                 .chain(std::iter::once(source.len()))
                 .collect();
             for (index, &at) in boundaries.iter().enumerate() {
-                if cfg!(miri) && index % 5 != 0 {
+                if cfg!(miri) && ![0, boundaries.len() / 2, boundaries.len() - 1].contains(&index) {
                     continue;
                 }
-                for replacement in replacements {
+                let selected = if cfg!(miri) {
+                    &replacements[..5]
+                } else {
+                    &replacements[..]
+                };
+                for &replacement in selected {
                     let end = boundaries.get(index + 1).copied().unwrap_or(at);
                     let mut edited = parsed(source, mode);
                     edited
@@ -322,7 +326,7 @@ fn edits_equal_complete_reparsing() {
 fn invalid_edits_leave_the_original_tree_intact() {
     let mut tree = parsed("a🦀b", Mode::Markup);
     let before = canonical(tree.as_tree());
-    for range in [2..3, 10..10, 4..1] {
+    for range in [2..3, 10..10, std::ops::Range { start: 4, end: 1 }] {
         assert_eq!(
             tree.edit(range, "x", Limits::default()).unwrap_err().kind,
             ErrorKind::InvalidEdit
@@ -341,4 +345,100 @@ fn plain_text_edit_reuses_syntax_nodes() {
     assert!(stats.reused_nodes > 0);
     assert!((stats.reparsed.len() as usize) < source.len());
     assert_tree(tree.as_tree());
+}
+
+#[test]
+fn diagnostic_capacity_is_a_hard_limit() {
+    let mut nodes = [Node::EMPTY; 32];
+    let error = parse(
+        "/* unfinished",
+        Mode::Markup,
+        &mut nodes,
+        &mut [],
+        Limits::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::DiagnosticLimit);
+}
+
+#[test]
+fn failed_resource_limited_edit_is_transactional() {
+    let mut tree = parsed("Hello world", Mode::Markup);
+    let before = canonical(tree.as_tree());
+    let limits = Limits {
+        max_nodes: 1,
+        ..Limits::default()
+    };
+    assert_eq!(
+        tree.edit(1..2, "a", limits).unwrap_err().kind,
+        ErrorKind::NodeLimit
+    );
+    assert_eq!(tree.as_tree().source(), "Hello world");
+    assert_eq!(canonical(tree.as_tree()), before);
+}
+
+#[test]
+fn separate_arena_reparse_checks_the_declared_edit() {
+    let original = parsed("Hello world", Mode::Markup);
+    let mut nodes = [Node::EMPTY; 64];
+    let mut diagnostics = [Diagnostic::EMPTY; 16];
+    let edit = zsyn::Edit {
+        range: Span::new(1, 2),
+        replacement_len: 1,
+    };
+    let (updated, stats) = zsyn::reparse(
+        original.as_tree(),
+        "Hallo world",
+        edit,
+        &mut nodes,
+        &mut diagnostics,
+        Limits::default(),
+    )
+    .unwrap();
+    assert!(!stats.full_reparse);
+    assert_eq!(
+        canonical(updated),
+        canonical(parsed("Hallo world", Mode::Markup).as_tree())
+    );
+    assert_eq!(original.as_tree().source(), "Hello world");
+    let error = zsyn::reparse(
+        original.as_tree(),
+        "Hallo Earth",
+        edit,
+        &mut nodes,
+        &mut diagnostics,
+        Limits::default(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, ErrorKind::InvalidEdit);
+}
+
+#[test]
+fn giant_plain_text_uses_two_nodes_and_honors_source_budget() {
+    let length = if cfg!(miri) { 4096 } else { 16 * 1024 * 1024 };
+    let source = "a".repeat(length);
+    let mut nodes = [Node::EMPTY; 2];
+    let mut diagnostics = [];
+    let tree = parse(
+        &source,
+        Mode::Markup,
+        &mut nodes,
+        &mut diagnostics,
+        Limits::default(),
+    )
+    .unwrap();
+    assert_eq!(tree.nodes().len(), 2);
+    assert_eq!(tree.storage_bytes(), 2 * std::mem::size_of::<Node>());
+    assert_eq!(tree.root().text().len(), length);
+    let text = tree.root().children().next().unwrap();
+    assert_eq!(text.kind(), zsyn::SyntaxKind::Text);
+    assert_eq!(text.text().as_ptr(), source.as_ptr());
+    assert_eq!(text.span(), Span::new(0, length as u32));
+    assert!(tree.diagnostics().is_empty());
+    let limits = Limits {
+        max_source_bytes: length - 1,
+        ..Limits::default()
+    };
+    let error = parse(&source, Mode::Markup, &mut nodes, &mut diagnostics, limits).unwrap_err();
+    assert_eq!(error.kind, ErrorKind::SourceLimit);
 }

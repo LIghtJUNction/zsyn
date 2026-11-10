@@ -69,6 +69,32 @@ class TrustTests(unittest.TestCase):
                 release.trusted_branch()
             git.assert_not_called()
 
+    def test_allows_only_default_branch_push_and_manual_dispatch(self):
+        for event in ("push", "workflow_dispatch"):
+            env = {"GITHUB_EVENT_NAME": event, "GITHUB_REPOSITORY": release.REPOSITORY,
+                   "GITHUB_REF": "refs/heads/main"}
+            with self.subTest(event=event), patch.dict(os.environ, env, clear=True), \
+                    patch.object(release, "run", return_value="main"), \
+                    patch.object(release, "git") as git:
+                self.assertEqual(release.trusted_branch(), "main")
+            git.assert_called_once_with("fetch", "origin", "main", "--tags")
+
+    def test_rejects_pr_target_and_fork_pushes(self):
+        cases = (
+            {"GITHUB_EVENT_NAME": "pull_request_target", "GITHUB_REPOSITORY": release.REPOSITORY,
+             "GITHUB_REF": "refs/heads/main"},
+            {"GITHUB_EVENT_NAME": "push", "GITHUB_REPOSITORY": "other/zsyn",
+             "GITHUB_REF": "refs/heads/main"},
+            {"GITHUB_EVENT_NAME": "push", "GITHUB_REPOSITORY": release.REPOSITORY,
+             "GITHUB_REF": "refs/heads/feature"},
+        )
+        for env in cases:
+            with self.subTest(env=env), patch.dict(os.environ, env, clear=True), \
+                    patch.object(release, "run", return_value="main"), \
+                    patch.object(release, "git") as git, self.assertRaises(RuntimeError):
+                release.trusted_branch()
+            git.assert_not_called()
+
     def test_tag_cannot_be_adopted_from_another_run(self):
         with patch.dict(os.environ, {"GITHUB_RUN_ID": "123"}), \
                 patch.object(release, "git", side_effect=["tag", "Source-Commit: abc\nRelease-Run: 122"]), \
@@ -101,6 +127,47 @@ class TrustTests(unittest.TestCase):
                 contextlib.redirect_stdout(io.StringIO()) as output:
             release.plan("minor")
         self.assertIn('"version": "0.2.0"', output.getvalue())
+
+    def test_manifest_push_publishes_only_unpublished_version(self):
+        for existing, expected in ((None, "true"), ({"num": "0.1.0"}, "false")):
+            with self.subTest(existing=existing), \
+                    patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push"}, clear=True), \
+                    patch.object(release, "trusted_branch", return_value="main"), \
+                    patch.object(release, "package_version", return_value="0.1.0"), \
+                    patch.object(release, "tag_exists", return_value=False), \
+                    patch.object(release, "git", return_value="abc"), \
+                    patch.object(release, "registry_version", return_value=existing), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                release.plan("none")
+            self.assertIn(f'"publish": "{expected}"', output.getvalue())
+            self.assertIn('"version": "0.1.0"', output.getvalue())
+
+    def test_published_automatic_release_can_resume_only_its_own_run(self):
+        for same_run in (False, True):
+            with self.subTest(same_run=same_run), \
+                    patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push"}, clear=True), \
+                    patch.object(release, "trusted_branch", return_value="main"), \
+                    patch.object(release, "package_version", return_value="0.1.0"), \
+                    patch.object(release, "tag_exists", return_value=True), \
+                    patch.object(release, "tagged_by_this_run", return_value=same_run), \
+                    patch.object(release, "git", return_value="abc"), \
+                    patch.object(release, "registry_version", return_value={"num": "0.1.0"}), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                release.plan("none")
+            self.assertIn(f'"publish": "{str(same_run).lower()}"', output.getvalue())
+
+    def test_manifest_push_cannot_apply_implicit_bump(self):
+        with patch.dict(os.environ, {"GITHUB_EVENT_NAME": "push"}, clear=True), \
+                patch.object(release, "trusted_branch", return_value="main"), \
+                self.assertRaises(RuntimeError):
+            release.plan("patch")
+
+    def test_missing_publish_token_fails_before_any_mutation(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(release, "git") as git, \
+                patch.object(release, "set_version") as set_version, self.assertRaises(RuntimeError):
+            release.publish("a" * 40, "0.1.0")
+        git.assert_not_called()
+        set_version.assert_not_called()
 
 
 class RegistryTests(unittest.TestCase):

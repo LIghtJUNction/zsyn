@@ -34,10 +34,16 @@ jobs:
         run: cargo test --locked --manifest-path comparison/Cargo.toml
       - name: Build the fixed-profile benchmark
         run: cargo build --release --locked --manifest-path comparison/Cargo.toml --bin benchmark
-      - name: Measure parsing, single-character edits, and allocation use
+      - name: Measure parsing and first and repeated single-character edits
         run: |
           BENCH_CPU=$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')
-          /usr/bin/time -v -o benchmark-results/process-memory.txt taskset -c "$BENCH_CPU" comparison/target/release/benchmark > benchmark-results/results.csv 2> benchmark-results/metadata.txt
+          /usr/bin/time -v -o benchmark-results/process-memory.txt taskset -c "$BENCH_CPU" comparison/target/release/benchmark > benchmark-results/timing.csv 2> benchmark-results/timing-metadata.txt
+      - name: Measure allocations in a separate instrumented executable
+        run: |
+          cargo build --release --locked --manifest-path comparison/Cargo.toml --bin benchmark --features allocation-stats
+          BENCH_CPU=$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')
+          taskset -c "$BENCH_CPU" comparison/target/release/benchmark > benchmark-results/memory.csv 2> benchmark-results/memory-metadata.txt
+          python3 comparison/merge-results.py benchmark-results/timing.csv benchmark-results/memory.csv benchmark-results/results.csv
       - name: Retain raw results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -107,8 +107,8 @@ def registry_version(version):
 
 
 def trusted_branch():
-    require(os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch",
-            "releases require workflow_dispatch")
+    require(os.environ.get("GITHUB_EVENT_NAME") in {"push", "workflow_dispatch"},
+            "releases require a default-branch manifest push or workflow_dispatch")
     require(os.environ.get("GITHUB_REPOSITORY") == REPOSITORY,
             "releases are restricted to the upstream repository")
     branch = run("gh", "api", f"repos/{REPOSITORY}", "--jq", ".default_branch")
@@ -122,26 +122,40 @@ def tag_exists(tag):
     return run("git", "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}", check=False).returncode == 0
 
 
-def same_release(tag, source):
-    require(git("cat-file", "-t", f"refs/tags/{tag}") == "tag", "expected an annotated release tag")
+def tagged_by_this_run(tag, source):
+    if git("cat-file", "-t", f"refs/tags/{tag}") != "tag":
+        return False
     message = git("for-each-ref", "--format=%(contents)", f"refs/tags/{tag}").splitlines()
-    require(f"Source-Commit: {source}" in message and
-            f"Release-Run: {os.environ.get('GITHUB_RUN_ID')}" in message,
+    return (f"Source-Commit: {source}" in message and
+            f"Release-Run: {os.environ.get('GITHUB_RUN_ID')}" in message)
+
+
+def same_release(tag, source):
+    require(tagged_by_this_run(tag, source),
             "tag already belongs to another release; never overwrite it")
 
 
 def plan(bump):
     branch = trusted_branch()
+    if os.environ.get("GITHUB_EVENT_NAME") == "push":
+        require(bump == "none", "manifest pushes publish the committed version without a bump")
     source = git("rev-parse", "HEAD")
     version = next_version(package_version(), bump)
     tag = f"v{version}"
-    if tag_exists(tag):
-        same_release(tag, source)
-    else:
+    tagged = tag_exists(tag)
+    if not tagged:
         require(git("rev-parse", f"origin/{branch}") == source,
                 "default branch advanced; dispatch a new run")
-        require(registry_version(version) is None, "version is already published; choose a bump")
-    data = {"source": source, "version": version, "tag": tag}
+    existing = registry_version(version)
+    retry = tagged and tagged_by_this_run(tag, source)
+    publish = not (os.environ.get("GITHUB_EVENT_NAME") == "push" and existing is not None and not retry)
+    if publish:
+        if tagged:
+            require(retry, "tag already belongs to another release; never overwrite it")
+        else:
+            require(existing is None, "version is already published; choose a bump")
+    data = {"source": source, "version": version, "tag": tag,
+            "publish": "true" if publish else "false"}
     print(json.dumps(data, indent=2))
     if output := os.environ.get("GITHUB_OUTPUT"):
         with open(output, "a", encoding="utf-8") as file:

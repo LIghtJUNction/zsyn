@@ -35,22 +35,26 @@ Run on an x86-64 machine with the exact release flags below. Record the compiler
 ```sh
 rustc --version --verbose
 RUSTFLAGS='-C target-cpu=x86-64' cargo run --locked --release \
-  --manifest-path comparison/Cargo.toml --bin benchmark > benchmark.csv
+  --manifest-path comparison/Cargo.toml --bin benchmark > timing.csv
+RUSTFLAGS='-C target-cpu=x86-64' cargo run --locked --release \
+  --manifest-path comparison/Cargo.toml --features allocation-stats \
+  --bin benchmark > memory.csv
+python3 comparison/merge-results.py timing.csv memory.csv benchmark.csv
 ```
 
-Each timing performs eight warm-up calls, calibrates a batch to at least 15 ms, and reports the median of nine equal-sized batches. `std::hint::black_box` surrounds inputs and results. Complete parsed results are dropped inside the timed region. The release profile uses optimization level 3, thin LTO, and one codegen unit for both implementations.
+Full-parse and hot-edit timings perform eight warm-up calls, calibrate a batch to at least 15 ms, and report the median of nine equal-sized batches. First-edit timings use the independent-tree procedure below. `std::hint::black_box` surrounds inputs and results. Complete parsed results are dropped inside the timed region. The release profile uses optimization level 3, thin LTO, and one codegen unit for both implementations.
 
 Full parsing reports two zsyn interfaces. `zsyn-arena` reuses caller-allocated node and diagnostic buffers, measuring the core parser's advertised allocation-free API. `zsyn-owned` includes source ownership and allocations on every call. Both build the same verified complete tree. The separate rows show the cost of owning the source and allocating storage; the arena row assumes the application already has reusable buffers.
 
-Single-character editing alternates a fixed ASCII character and its replacement at the same byte position. Initial source/tree construction happens outside timing. Both edited states pass the complete-tree gate before measurement. The `reparsed_bytes` column records the affected region returned by each implementation. `typst-Source` also maintains Typst's source line index and numbered spans; zsyn maintains its documented syntax-tree state. These interfaces have different supporting metadata, which should be considered when interpreting edit latency.
+Single-character editing has two separately named measurements. `edit-first` prepares eight independent, freshly parsed source trees outside the timed region, times the first edit to each, and reports the median of nine batches. `edit-hot` alternates a fixed ASCII character and its replacement at the same byte position with the existing tree, allowing an editor's cursor locality to benefit from cached lookup. Initial source/tree construction happens outside timing in both cases. Both edited states pass the complete-tree gate before measurement. The `reparsed_bytes` column records the affected region returned by each implementation. `typst-Source` also maintains Typst's source line index and numbered spans; zsyn maintains its documented syntax-tree state. These interfaces have different supporting metadata, which should be considered when interpreting edit latency.
 
 The `mib_s` value for a full parse is source MiB divided by elapsed seconds. For an edit it expresses document-size throughput; **edit latency and reparsed bytes are the meaningful incremental metrics**, since the parser is expected to reuse most of the document.
 
 ## Memory accounting
 
-A counting wrapper around Rust's `System` allocator records allocation calls, requested bytes, and peak live requested bytes during one operation. It is confined to this unpublished benchmark executable. All tree comparisons and formatting happen outside the measurement window. Allocation accounting is disabled during latency measurements except for a single atomic flag read in the wrapper.
+A counting wrapper around Rust's `System` allocator records allocation calls, requested bytes, and peak live requested bytes during one operation. It is confined to this unpublished benchmark executable. All tree comparisons and formatting happen outside the measurement window. The default timing executable uses Rust's ordinary allocator directly; the counting wrapper is not compiled into it. A second build with `allocation-stats` measures memory without reporting timings. `merge-results.py` checks all 35 rows, the complete-tree gate, source fingerprints, node counts, storage capacities, and reparsed ranges before joining the two runs. Timing rows from an instrumented executable are rejected. Both raw CSV files should be retained alongside the joined results.
 
-`retained_arena_bytes` counts zsyn's initialized nodes and diagnostics. `reserved_bytes` includes unused storage capacity reported by the interface. The core arena's capacity is allocated before timing and is reported even though its parse operation performs no allocations. Typst rows expose allocator measurements; a zero in an arena-specific column means that metric is not applicable. Requested heap bytes exclude allocator bookkeeping, rounding, call stack, and executable pages; they are not process RSS. Incremental allocation counts and peaks describe additional allocations during the edit, not the already retained document.
+`retained_arena_bytes` counts zsyn's initialized nodes and diagnostics. `reserved_bytes` includes unused storage capacity reported by the interface. The core arena's capacity is allocated before timing and is reported even though its parse operation performs no allocations. Typst rows expose allocator measurements; a zero in an arena-specific column means that metric is not applicable. Requested heap bytes exclude allocator bookkeeping, rounding, call stack, and executable pages; they are not process RSS. Incremental allocation counts and allocated-byte totals exclude initial construction. The incremental peak includes the already retained document: the counter is enabled during construction, then allocation totals are reset before editing while the live-byte count is preserved. This accounts for old storage freed or replaced during an edit.
 
 ## Baseline design
 

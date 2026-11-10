@@ -3,11 +3,17 @@
 
 pub(crate) fn contains(ranges: &[(u32, u32)], ch: char) -> bool {
     let value = ch as u32;
-    ranges.binary_search_by(|&(start, end)| {
-        if end < value { core::cmp::Ordering::Less }
-        else if start > value { core::cmp::Ordering::Greater }
-        else { core::cmp::Ordering::Equal }
-    }).is_ok()
+    ranges
+        .binary_search_by(|&(start, end)| {
+            if end < value {
+                core::cmp::Ordering::Less
+            } else if start > value {
+                core::cmp::Ordering::Greater
+            } else {
+                core::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
 }
 
 pub(crate) static XID_START: &[(u32, u32)] = &[

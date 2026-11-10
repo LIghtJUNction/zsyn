@@ -1,7 +1,9 @@
 name: Release
-run-name: Release / ${{ inputs.bump }}
+run-name: Release / ${{ inputs.bump || 'manifest version' }}
 
 on:
+  push:
+    paths: [Cargo.toml]
   workflow_dispatch:
     inputs:
       bump:
@@ -27,6 +29,7 @@ jobs:
       version: ${{ steps.plan.outputs.version }}
       source: ${{ steps.plan.outputs.source }}
       tag: ${{ steps.plan.outputs.tag }}
+      publish: ${{ steps.plan.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -40,11 +43,12 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_BUMP: ${{ inputs.bump }}
+          RELEASE_BUMP: ${{ inputs.bump || 'none' }}
         run: python scripts/release.py plan --bump "$RELEASE_BUMP"
 
   checks:
     needs: plan
+    if: needs.plan.outputs.publish == 'true'
     uses: ./.github/workflows/ci.yml
     with:
       ref: ${{ needs.plan.outputs.source }}
@@ -52,7 +56,7 @@ jobs:
 
   publish:
     needs: [plan, checks]
-    if: github.repository == 'LIghtJUNction/zsyn' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    if: needs.plan.outputs.publish == 'true' && github.repository == 'LIghtJUNction/zsyn' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
