@@ -1,0 +1,30 @@
+[package]
+name = "zsyn-comparison"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[features]
+default = ["oracle"]
+oracle = ["dep:typst-syntax"]
+
+[dependencies]
+zsyn = { path = "..", features = ["alloc"] }
+typst-syntax = { version = "=0.15.1", optional = true }
+
+[[bin]]
+name = "benchmark"
+path = "src/bin/benchmark.rs"
+required-features = ["oracle"]
+
+[[bin]]
+name = "dump"
+path = "src/bin/dump.rs"
+required-features = ["oracle"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

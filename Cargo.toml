@@ -1,0 +1,25 @@
+[package]
+name = "zsyn"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Zero-dependency, bounded, no_std syntax trees for Typst markup, code, and math"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/LIghtJUNction/zsyn"
+readme = "README.md"
+keywords = ["typst", "parser", "no-std", "incremental", "syntax"]
+categories = ["parser-implementations", "no-std", "text-processing"]
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE-*", "NOTICE"]
+
+[features]
+default = []
+alloc = []
+
+[workspace]
+members = ["."]
+exclude = ["comparison"]
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+

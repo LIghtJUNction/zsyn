@@ -1,0 +1,10 @@
+zsyn is independently implemented. The public Typst syntax and syntax-kind names
+are used for compatibility. The differential test oracle is typst-syntax 0.15.1
+and is an optional dependency of the separate, unpublished comparison project.
+
+Identifier classification data is generated from Unicode 18.0.0
+DerivedCoreProperties.txt, distributed under LICENSE-UNICODE.
+https://www.unicode.org/Public/18.0.0/ucd/DerivedCoreProperties.txt
+
+Project code is available under either LICENSE-MIT or LICENSE-APACHE.
+

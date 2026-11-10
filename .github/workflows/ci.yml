@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ''
+      version:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: '1'
+  RUSTDOCFLAGS: -D warnings
+
+jobs:
+  test:
+    name: Tests / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Apply candidate version
+        if: inputs.version != ''
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py set-version "$RELEASE_VERSION"
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt --component clippy
+          rustup default stable
+          rustc --version --verbose
+      - name: Core, documentation, and compatibility tests
+        run: |
+          cargo test --locked --no-default-features
+          cargo test --locked --all-features
+          cargo test --locked --manifest-path comparison/Cargo.toml
+          cargo test --locked --manifest-path comparison/Cargo.toml --no-default-features --test core
+      - name: Formatting and lints
+        run: |
+          cargo fmt --all --check
+          cargo fmt --manifest-path comparison/Cargo.toml --all --check
+          cargo clippy --locked --all-targets --all-features -- -D warnings
+          cargo clippy --locked --all-targets --no-default-features -- -D warnings
+          cargo clippy --locked --manifest-path comparison/Cargo.toml --all-targets -- -D warnings
+      - name: Documentation and package validation
+        run: |
+          cargo doc --locked --no-deps --all-features
+          cargo package --locked --allow-dirty
+          python scripts/check-package.py
+          cargo publish --locked --dry-run --allow-dirty
+      - name: Release tooling tests
+        if: matrix.os == 'ubuntu-latest'
+        run: python -m unittest discover -s scripts -p 'test_*.py' -v
+
+  msrv:
+    name: MSRV / 1.74.0
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Apply candidate version
+        if: inputs.version != ''
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py set-version "$RELEASE_VERSION"
+      - name: Install MSRV and test both feature configurations
+        run: |
+          rustup toolchain install 1.74.0 --profile minimal
+          cargo +1.74.0 test --locked --no-default-features
+          cargo +1.74.0 test --locked --all-features
+          cargo +1.74.0 build --locked --all-features
+          rustc +1.74.0 --edition=2021 --test comparison/tests/core.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-core-tests
+          target/msrv-core-tests
+          cargo +1.74.0 package --locked --allow-dirty
+
+  targets:
+    name: Target / ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+          - wasm32-unknown-unknown
+          - thumbv7em-none-eabi
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Apply candidate version
+        if: inputs.version != ''
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py set-version "$RELEASE_VERSION"
+      - name: Compile core without an OS or allocator
+        env:
+          RUST_TARGET: ${{ matrix.target }}
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add --toolchain stable "$RUST_TARGET"
+          cargo +stable check --locked --lib --no-default-features --target "$RUST_TARGET"
+          cargo +stable check --locked --lib --features alloc --target "$RUST_TARGET"
+
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+      - name: Apply candidate version
+        if: inputs.version != ''
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py set-version "$RELEASE_VERSION"
+      - name: Install Miri
+        run: |
+          rustup toolchain install nightly --profile minimal --component miri
+          cargo +nightly miri setup
+      - name: Check parser and incremental updates
+        env:
+          MIRIFLAGS: -Zmiri-strict-provenance
+        run: cargo +nightly miri test --locked --manifest-path comparison/Cargo.toml --no-default-features --test core
