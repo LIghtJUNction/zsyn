@@ -1,6 +1,6 @@
 //! Unicode's official grapheme-break conformance cases for the no_std helper.
 #[allow(dead_code)]
-#[clippy::msrv = "1.74"]
+#[clippy::msrv = "1.99.1"]
 #[path = "../../src/grapheme.rs"]
 mod grapheme;
 #[allow(dead_code)]
