@@ -175,10 +175,10 @@ impl Parser<'_, '_> {
     }
     #[inline]
     fn peek(&mut self, mode: Mode) -> Option<Token> {
-        if let Some((m, token)) = self.cached {
-            if m == mode {
-                return Some(token);
-            }
+        if let Some((m, token)) = self.cached
+            && m == mode
+        {
+            return Some(token);
         }
         let t = Lexer::at_boundary(self.source, mode, self.pos).next();
         self.cached = t.map(|token| (mode, token));
@@ -459,7 +459,7 @@ impl Parser<'_, '_> {
                     self.take(Mode::Markup, &mut chain)?;
                     if self
                         .peek(Mode::Code)
-                        .map_or(true, |v| trivia(v.kind) || closing(v.kind))
+                        .is_none_or(|v| trivia(v.kind) || closing(v.kind))
                     {
                         self.missing()?
                     } else {
@@ -617,7 +617,7 @@ impl Parser<'_, '_> {
                 && self
                     .ahead(Mode::Code)
                     .0
-                    .map_or(true, |t| Some(t.kind) == stop)
+                    .is_none_or(|t| Some(t.kind) == stop)
             {
                 break;
             }
@@ -649,7 +649,7 @@ impl Parser<'_, '_> {
         self.group(K::Code, c, start)
     }
     fn code_value(&mut self, min: u8, ctx: Context, chain: &mut Chain) -> Result<u32, ParseError> {
-        if self.ahead(Mode::Code).0.map_or(true, |t| {
+        if self.ahead(Mode::Code).0.is_none_or(|t| {
             matches!(
                 t.kind,
                 K::End
@@ -921,29 +921,28 @@ impl Parser<'_, '_> {
         let placeholders = self.placeholders;
         self.pattern_depth += 1;
         let mut result = self.collection_inner(fixed);
-        if let Ok(id) = result {
-            if fixed.is_none()
-                && !self.pattern_replay
-                && self.errors > first_error
-                && matches!(self.nodes[id as usize].kind, K::Array | K::Dict)
-                && self.ahead(Mode::Code).0.map(|t| t.kind) == Some(K::Eq)
+        if let Ok(id) = result
+            && fixed.is_none()
+            && !self.pattern_replay
+            && self.errors > first_error
+            && matches!(self.nodes[id as usize].kind, K::Array | K::Dict)
+            && self.ahead(Mode::Code).0.map(|t| t.kind) == Some(K::Eq)
+        {
+            self.pos = start;
+            self.used = first_node;
+            self.errors = first_error;
+            self.placeholders = placeholders;
+            self.cached = None;
+            self.ahead_cached = None;
+            self.pattern_replay = true;
+            result = self.assignment_pattern_group();
+            self.pattern_replay = false;
+            if let Ok(pattern) = result
+                && self.ahead(Mode::Code).0.map(|t| t.kind) != Some(K::Eq)
             {
-                self.pos = start;
-                self.used = first_node;
-                self.errors = first_error;
-                self.placeholders = placeholders;
-                self.cached = None;
-                self.ahead_cached = None;
-                self.pattern_replay = true;
-                result = self.assignment_pattern_group();
-                self.pattern_replay = false;
-                if let Ok(pattern) = result {
-                    if self.ahead(Mode::Code).0.map(|t| t.kind) != Some(K::Eq) {
-                        match self.missing() {
-                            Ok(error) => self.nodes[pattern as usize].next_sibling = error,
-                            Err(error) => result = Err(error),
-                        }
-                    }
+                match self.missing() {
+                    Ok(error) => self.nodes[pattern as usize].next_sibling = error,
+                    Err(error) => result = Err(error),
                 }
             }
         }
@@ -1397,7 +1396,7 @@ impl Parser<'_, '_> {
             if newline && !ctx.newline {
                 break;
             }
-            if next.map_or(true, |t| closing(t.kind) || t.kind == K::Semicolon) {
+            if next.is_none_or(|t| closing(t.kind) || t.kind == K::Semicolon) {
                 if pending_invalid {
                     let span = Span {
                         start: self.pos as u32,
@@ -1498,7 +1497,7 @@ impl Parser<'_, '_> {
             }
             if stop.is_some()
                 && trivia(t.kind)
-                && self.ahead(Mode::Math).0.map_or(true, |next| {
+                && self.ahead(Mode::Math).0.is_none_or(|next| {
                     stop.is_some_and(|stop| stop.matches(next, self.source))
                         || next.kind == K::Dollar
                 })
@@ -1513,7 +1512,7 @@ impl Parser<'_, '_> {
                 self.take(Mode::Math, &mut c)?;
                 let expr = if self
                     .peek(Mode::Code)
-                    .map_or(true, |v| trivia(v.kind) || closing(v.kind))
+                    .is_none_or(|v| trivia(v.kind) || closing(v.kind))
                 {
                     self.missing()?
                 } else {
@@ -1620,7 +1619,7 @@ impl Parser<'_, '_> {
                 };
                 self.until(Mode::Math, t.span.start as usize, &mut c)?;
                 self.take(Mode::Math, &mut c)?;
-                let rhs = if self.ahead(Mode::Math).0.map_or(true, |v| {
+                let rhs = if self.ahead(Mode::Math).0.is_none_or(|v| {
                     matches!(
                         v.kind,
                         K::Dollar
@@ -1850,7 +1849,7 @@ impl Parser<'_, '_> {
             ) {
                 let (next, _) = self.ahead(Mode::Math);
                 if trivia(self.kind(Mode::Math))
-                    && next.map_or(true, |t| {
+                    && next.is_none_or(|t| {
                         matches!(t.kind, K::RightParen | K::Comma | K::Semicolon | K::Dollar)
                     })
                 {
@@ -2112,7 +2111,7 @@ fn raw_indent(source: &str, mut pos: usize) -> usize {
         if source[pos..]
             .chars()
             .next()
-            .map_or(true, |ch| !is_newline(ch))
+            .is_none_or(|ch| !is_newline(ch))
         {
             indent = indent.min(columns);
             if indent == 0 {

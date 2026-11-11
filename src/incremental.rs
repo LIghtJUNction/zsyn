@@ -93,22 +93,23 @@ pub(crate) fn reparse_validated<'s, 'a>(
     limits: Limits,
 ) -> Result<(Tree<'s, 'a>, EditStats), ParseError> {
     if reuse_allowed(old, limits) {
-        if let Some(id) = leaf_edit(old, new_source, edit) {
-            if old.nodes.len() <= nodes.len() && old.diagnostics.len() <= diagnostics.len() {
-                nodes[..old.nodes.len()].copy_from_slice(old.nodes);
-                diagnostics[..old.diagnostics.len()].copy_from_slice(old.diagnostics);
-                shift_nodes(&mut nodes[..old.nodes.len()], id, edit);
-                shift_diagnostics(&mut diagnostics[..old.diagnostics.len()], edit);
-                let span = nodes[id].span;
-                return Ok((
-                    Tree::new(new_source, nodes, diagnostics, old.info),
-                    EditStats {
-                        reparsed: span,
-                        reused_nodes: old.nodes.len(),
-                        full_reparse: false,
-                    },
-                ));
-            }
+        if let Some(id) = leaf_edit(old, new_source, edit)
+            && old.nodes.len() <= nodes.len()
+            && old.diagnostics.len() <= diagnostics.len()
+        {
+            nodes[..old.nodes.len()].copy_from_slice(old.nodes);
+            diagnostics[..old.diagnostics.len()].copy_from_slice(old.diagnostics);
+            shift_nodes(&mut nodes[..old.nodes.len()], id, edit);
+            shift_diagnostics(&mut diagnostics[..old.diagnostics.len()], edit);
+            let span = nodes[id].span;
+            return Ok((
+                Tree::new(new_source, nodes, diagnostics, old.info),
+                EditStats {
+                    reparsed: span,
+                    reused_nodes: old.nodes.len(),
+                    full_reparse: false,
+                },
+            ));
         }
         if let Some((info, stats)) = subtree_edit(old, new_source, edit, nodes, diagnostics, limits)
         {
@@ -228,49 +229,47 @@ fn subtree_edit(
             node.span.start,
             (i64::from(node.span.end) + byte_delta) as u32,
         );
-        if isolated_context(old, candidate) && closed(old.nodes, candidate, node.span, node.kind) {
-            if let Some((before, after)) = diagnostic_partition(old.diagnostics, node.span) {
-                let retained_errors = old.diagnostics.len() - (after - before);
-                let source = new.get(new_span.range())?;
-                let budget = Limits {
-                    max_depth: limits.max_depth.min(128).checked_sub(old.info.depth)?,
-                    max_steps: remaining_steps,
-                    max_diagnostics: limits.max_diagnostics.checked_sub(retained_errors)?,
-                    ..limits
-                };
-                if let Ok(local) = parse_into(source, Mode::Code, nodes, diagnostics, budget) {
-                    remaining_steps = remaining_steps.checked_sub(local.steps)?;
-                    // The artificial Code root must contain exactly the closed
-                    // construct. Early closers and unterminated tokens fail here.
-                    let wrapper = nodes[local.root as usize];
-                    let root = wrapper.first_child as usize;
-                    if let Some(replacement) = nodes.get(root) {
-                        if local.nodes >= 2
-                            && root == local.nodes - 2
-                            && replacement.next_sibling == NONE
-                            && replacement.kind == node.kind
-                            && replacement.span == Span::new(0, source.len() as u32)
-                            && closed(nodes, root, replacement.span, node.kind)
-                        {
-                            if let Some((info, reused)) =
-                                splice(old, candidate, new_span, local, nodes, diagnostics, limits)
-                            {
-                                return Some((
-                                    info,
-                                    EditStats {
-                                        reparsed: new_span,
-                                        reused_nodes: reused,
-                                        full_reparse: false,
-                                    },
-                                ));
-                            }
-                        }
-                    }
-                } else {
-                    // A resource failure ends speculative reparsing. The full
-                    // parser then validates the requested budget in context.
-                    return None;
+        if isolated_context(old, candidate)
+            && closed(old.nodes, candidate, node.span, node.kind)
+            && let Some((before, after)) = diagnostic_partition(old.diagnostics, node.span)
+        {
+            let retained_errors = old.diagnostics.len() - (after - before);
+            let source = new.get(new_span.range())?;
+            let budget = Limits {
+                max_depth: limits.max_depth.min(128).checked_sub(old.info.depth)?,
+                max_steps: remaining_steps,
+                max_diagnostics: limits.max_diagnostics.checked_sub(retained_errors)?,
+                ..limits
+            };
+            if let Ok(local) = parse_into(source, Mode::Code, nodes, diagnostics, budget) {
+                remaining_steps = remaining_steps.checked_sub(local.steps)?;
+                // The artificial Code root must contain exactly the closed
+                // construct. Early closers and unterminated tokens fail here.
+                let wrapper = nodes[local.root as usize];
+                let root = wrapper.first_child as usize;
+                if let Some(replacement) = nodes.get(root)
+                    && local.nodes >= 2
+                    && root == local.nodes - 2
+                    && replacement.next_sibling == NONE
+                    && replacement.kind == node.kind
+                    && replacement.span == Span::new(0, source.len() as u32)
+                    && closed(nodes, root, replacement.span, node.kind)
+                    && let Some((info, reused)) =
+                        splice(old, candidate, new_span, local, nodes, diagnostics, limits)
+                {
+                    return Some((
+                        info,
+                        EditStats {
+                            reparsed: new_span,
+                            reused_nodes: reused,
+                            full_reparse: false,
+                        },
+                    ));
                 }
+            } else {
+                // A resource failure ends speculative reparsing. The full
+                // parser then validates the requested budget in context.
+                return None;
             }
         }
         // A broken inner delimiter can still leave its enclosing block intact.

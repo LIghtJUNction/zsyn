@@ -41,7 +41,11 @@ fn class(c: char) -> Class {
         return Ri;
     }
     if (0xac00..=0xd7a3).contains(&cp) {
-        return if (cp - 0xac00) % 28 == 0 { Lv } else { Lvt };
+        return if (cp - 0xac00).is_multiple_of(28) {
+            Lv
+        } else {
+            Lvt
+        };
     }
     if contains(d::EXTEND, c) {
         Extend

@@ -250,25 +250,24 @@ impl OwnedTree {
             range: Span::new(range.start as u32, range.end as u32),
             replacement_len: replacement.len() as u32,
         };
-        if incremental::reuse_allowed(self.as_tree(), limits) {
-            if let Some(id) =
+        if incremental::reuse_allowed(self.as_tree(), limits)
+            && let Some(id) =
                 incremental::leaf_edit_patch(self.as_tree(), replacement, edit, self.recent_leaf)
-            {
-                self.source
-                    .try_reserve(len.saturating_sub(self.source.len()))
-                    .map_err(|_| failure(ErrorKind::AllocationFailed))?;
-                // Every fallible check has completed. The byte boundaries are
-                // valid and capacity is sufficient, so replacement cannot allocate.
-                self.source.replace_range(range, replacement);
-                incremental::shift_nodes(&mut self.nodes, id, edit);
-                incremental::shift_diagnostics(&mut self.diagnostics, edit);
-                self.recent_leaf = Some(id);
-                return Ok(EditStats {
-                    reparsed: self.nodes[id].span,
-                    reused_nodes: self.nodes.len(),
-                    full_reparse: false,
-                });
-            }
+        {
+            self.source
+                .try_reserve(len.saturating_sub(self.source.len()))
+                .map_err(|_| failure(ErrorKind::AllocationFailed))?;
+            // Every fallible check has completed. The byte boundaries are
+            // valid and capacity is sufficient, so replacement cannot allocate.
+            self.source.replace_range(range, replacement);
+            incremental::shift_nodes(&mut self.nodes, id, edit);
+            incremental::shift_diagnostics(&mut self.diagnostics, edit);
+            self.recent_leaf = Some(id);
+            return Ok(EditStats {
+                reparsed: self.nodes[id].span,
+                reused_nodes: self.nodes.len(),
+                full_reparse: false,
+            });
         }
         let mut text = String::new();
         text.try_reserve_exact(len)

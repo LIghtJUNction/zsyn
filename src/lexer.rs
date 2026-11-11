@@ -669,7 +669,7 @@ impl<'s> Lexer<'s> {
                 while self.starts("=") {
                     self.pos += 1;
                 }
-                if self.ch().map_or(true, char::is_whitespace)
+                if self.ch().is_none_or(char::is_whitespace)
                     || self.starts("//")
                     || self.starts("/*")
                 {
@@ -681,7 +681,7 @@ impl<'s> Lexer<'s> {
                 if self.source[start + 1..]
                     .chars()
                     .next()
-                    .map_or(true, char::is_whitespace)
+                    .is_none_or(char::is_whitespace)
                     || self.source[start + 1..].starts_with("//")
                     || self.source[start + 1..].starts_with("/*") =>
             {
@@ -718,7 +718,7 @@ impl<'s> Lexer<'s> {
                     && (self.source[self.pos + 1..]
                         .chars()
                         .next()
-                        .map_or(true, char::is_whitespace)
+                        .is_none_or(char::is_whitespace)
                         || self.source[self.pos + 1..].starts_with("//")
                         || self.source[self.pos + 1..].starts_with("/*"))
                 {
