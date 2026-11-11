@@ -1,7 +1,7 @@
 [package]
 name = "zsyn"
 version = "0.1.2"
-edition = "2024"
+edition = "2024" # Release with Rust 2024 Edition
 rust-version = "1.99.1"
 description = "Zero-dependency, bounded, no_std syntax trees for Typst markup, code, and math"
 license = "MIT OR Apache-2.0"
