@@ -79,7 +79,7 @@ jobs:
         run: python -m unittest discover -s scripts -p 'test_*.py' -v
 
   msrv:
-    name: MSRV / 1.74.0
+    name: MSRV / 1.99.1
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -97,17 +97,17 @@ jobs:
         run: python scripts/release.py set-version "$RELEASE_VERSION"
       - name: Install MSRV and test both feature configurations
         run: |
-          rustup toolchain install 1.74.0 --profile minimal
-          cargo +1.74.0 test --locked --no-default-features
-          cargo +1.74.0 test --locked --all-features
-          cargo +1.74.0 build --locked --all-features
-          rustc +1.74.0 --edition=2021 --test comparison/tests/core.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-core-tests
+          rustup toolchain install 1.99.1 --profile minimal
+          cargo +1.99.1 test --locked --no-default-features
+          cargo +1.99.1 test --locked --all-features
+          cargo +1.99.1 build --locked --all-features
+          rustc +1.99.1 --edition=2024 --test comparison/tests/core.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-core-tests
           target/msrv-core-tests
-          rustc +1.74.0 --edition=2021 --test comparison/tests/incremental.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-incremental-tests
+          rustc +1.99.1 --edition=2024 --test comparison/tests/incremental.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-incremental-tests
           target/msrv-incremental-tests
-          rustc +1.74.0 --edition=2021 --test comparison/tests/resources.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-resource-tests
+          rustc +1.99.1 --edition=2024 --test comparison/tests/resources.rs --extern zsyn=target/debug/libzsyn.rlib -o target/msrv-resource-tests
           target/msrv-resource-tests
-          cargo +1.74.0 package --locked --allow-dirty
+          cargo +1.99.1 package --locked --allow-dirty
 
   targets:
     name: Target / ${{ matrix.target }}
