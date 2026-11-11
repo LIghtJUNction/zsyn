@@ -1,5 +1,5 @@
 use zsyn::{
-    parse, reparse, Diagnostic, Edit, ErrorKind, Limits, Mode, Node, OwnedTree, Span, Tree,
+    Diagnostic, Edit, ErrorKind, Limits, Mode, Node, OwnedTree, Span, Tree, parse, reparse,
 };
 
 fn assert_same(actual: Tree<'_, '_>, expected: Tree<'_, '_>) {
@@ -266,7 +266,9 @@ fn arbitrary_structural_edits_match_full_reparse() {
         match (actual.edit(range.clone(), replacement, limits), expected) {
             (Ok(_), Ok(expected)) => assert_same(actual.as_tree(), expected.as_tree()),
             (Err(a), Err(b)) => assert_eq!(a.kind, b.kind),
-            (a, b) => panic!("edit mismatch source={source:?}, range={range:?}, replacement={replacement:?}, actual={a:?}, expected={b:?}"),
+            (a, b) => panic!(
+                "edit mismatch source={source:?}, range={range:?}, replacement={replacement:?}, actual={a:?}, expected={b:?}"
+            ),
         }
     }
 }

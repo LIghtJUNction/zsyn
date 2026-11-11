@@ -1,9 +1,9 @@
 //! Exact-CST-gated latency and allocation measurements. See comparison/README.md.
 use std::hint::black_box;
 use std::time::{Duration, Instant};
-use zsyn::{parse, Diagnostic, Limits, Mode, Node, OwnedTree};
+use zsyn::{Diagnostic, Limits, Mode, Node, OwnedTree, parse};
 use zsyn_comparison::{
-    canonical, compare_records, fnv1a, oracle_canonical, oracle_parse, workloads, ORACLE_VERSION,
+    ORACLE_VERSION, canonical, compare_records, fnv1a, oracle_canonical, oracle_parse, workloads,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -245,11 +245,22 @@ fn main() {
             "timing"
         }
     );
-    eprintln!("oracle=typst-syntax {ORACLE_VERSION}; samples=9 median; calibration>=15ms; source bytes use UTF-8");
-    eprintln!("core arena creation is outside timed region; owned includes source ownership/allocation; full parse results are dropped inside timing");
-    eprintln!("allocation byte counts are requested bytes, not RSS; edit allocation counts exclude construction; edit peaks include the retained document");
-    eprintln!("allocation_instrumented={}; first edits use 8 fresh independently parsed trees per sample outside timing", cfg!(feature = "allocation-stats"));
-    println!("workload,operation,engine,equivalent,allocation_instrumented,bytes,nodes,median_ns,mib_s,speedup_vs_typst,heap_allocations,allocated_bytes,peak_live_bytes,retained_arena_bytes,reserved_bytes,reparsed_bytes,source_fnv1a");
+    eprintln!(
+        "oracle=typst-syntax {ORACLE_VERSION}; samples=9 median; calibration>=15ms; source bytes use UTF-8"
+    );
+    eprintln!(
+        "core arena creation is outside timed region; owned includes source ownership/allocation; full parse results are dropped inside timing"
+    );
+    eprintln!(
+        "allocation byte counts are requested bytes, not RSS; edit allocation counts exclude construction; edit peaks include the retained document"
+    );
+    eprintln!(
+        "allocation_instrumented={}; first edits use 8 fresh independently parsed trees per sample outside timing",
+        cfg!(feature = "allocation-stats")
+    );
+    println!(
+        "workload,operation,engine,equivalent,allocation_instrumented,bytes,nodes,median_ns,mib_s,speedup_vs_typst,heap_allocations,allocated_bytes,peak_live_bytes,retained_arena_bytes,reserved_bytes,reparsed_bytes,source_fnv1a"
+    );
     let limits = Limits::default();
     for workload in workloads() {
         let source = workload.source.as_str();

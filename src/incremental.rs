@@ -1,6 +1,6 @@
 use crate::{
-    parse, parse_into, Diagnostic, ErrorKind, Lexer, Limits, Mode, Node, ParseError, ParseInfo,
-    Span, SyntaxKind as K, Tree, NONE,
+    Diagnostic, ErrorKind, Lexer, Limits, Mode, NONE, Node, ParseError, ParseInfo, Span,
+    SyntaxKind as K, Tree, parse, parse_into,
 };
 
 /// One contiguous replacement in the old source.

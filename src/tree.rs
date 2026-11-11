@@ -1,4 +1,4 @@
-use crate::{Diagnostic, Mode, ParseInfo, Span, SyntaxKind, NONE};
+use crate::{Diagnostic, Mode, NONE, ParseInfo, Span, SyntaxKind};
 
 /// Compact arena node. Text stays in the original source; links are arena indices.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,4 +1,4 @@
-use zsyn::{parse, Diagnostic, ErrorKind, Lexer, Limits, Mode, Node, SyntaxKind};
+use zsyn::{Diagnostic, ErrorKind, Lexer, Limits, Mode, Node, SyntaxKind, parse};
 
 #[test]
 fn flat_trivia_and_attachments_have_linear_work() {

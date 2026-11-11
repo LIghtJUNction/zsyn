@@ -1,6 +1,6 @@
 use crate::{
-    incremental, parse_into, Diagnostic, Edit, EditStats, ErrorKind, Limits, Mode, Node,
-    ParseError, ParseInfo, Span, Tree,
+    Diagnostic, Edit, EditStats, ErrorKind, Limits, Mode, Node, ParseError, ParseInfo, Span, Tree,
+    incremental, parse_into,
 };
 use alloc::{string::String, vec::Vec};
 use core::ops::Range;
@@ -97,7 +97,7 @@ fn markup_nodes(sample: &str) -> usize {
                                 .chars()
                                 .any(crate::lexer::is_newline) =>
                     {
-                        break
+                        break;
                     }
                     _ => {}
                 }

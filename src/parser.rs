@@ -2120,11 +2120,7 @@ fn raw_indent(source: &str, mut pos: usize) -> usize {
             }
         }
     }
-    if indent == usize::MAX {
-        0
-    } else {
-        indent
-    }
+    if indent == usize::MAX { 0 } else { indent }
 }
 fn raw_trim(source: &str, mut pos: usize, close: usize, indent: usize) -> usize {
     let mut end = pos;
@@ -2139,9 +2135,5 @@ fn raw_trim(source: &str, mut pos: usize, close: usize, indent: usize) -> usize 
             pos = end;
         }
     }
-    if end == close {
-        close
-    } else {
-        pos
-    }
+    if end == close { close } else { pos }
 }

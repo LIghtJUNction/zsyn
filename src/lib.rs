@@ -27,9 +27,9 @@ mod parser;
 mod tree;
 mod unicode;
 
-pub use incremental::{reparse, Edit, EditStats};
+pub use incremental::{Edit, EditStats, reparse};
 pub use kind::SyntaxKind;
-pub use lexer::{is_id_continue, is_id_start, Lexer, Token};
+pub use lexer::{Lexer, Token, is_id_continue, is_id_start};
 #[cfg(feature = "alloc")]
 pub use owned::OwnedTree;
 pub use parser::parse_into;

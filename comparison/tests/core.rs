@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use zsyn::{
-    parse, parse_bytes, Diagnostic, ErrorKind, Lexer, Limits, Mode, Node, OwnedTree, Span, Tree,
+    Diagnostic, ErrorKind, Lexer, Limits, Mode, Node, OwnedTree, Span, Tree, parse, parse_bytes,
 };
 fn parsed(source: &str, mode: Mode) -> OwnedTree {
     OwnedTree::parse(source, mode, Limits::default())

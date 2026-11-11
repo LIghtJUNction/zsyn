@@ -1,4 +1,4 @@
-use crate::{unicode, ErrorKind, Mode, Span, SyntaxKind as K};
+use crate::{ErrorKind, Mode, Span, SyntaxKind as K, unicode};
 
 /// A zero-copy lexical item, located by UTF-8 byte offsets.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -410,11 +410,7 @@ impl<'s> Lexer<'s> {
             valid = false;
         }
         let kind = if unit.is_empty() {
-            if float {
-                K::Float
-            } else {
-                K::Int
-            }
+            if float { K::Float } else { K::Int }
         } else if matches!(
             unit,
             "pt" | "mm" | "cm" | "in" | "em" | "deg" | "rad" | "fr" | "%"
